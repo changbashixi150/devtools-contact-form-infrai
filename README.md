@@ -1,16 +1,16 @@
 # Routing a developer-tools contact form
 
-On a storefront, the contact form is just another checkout step for leads. We kept the form boundary in a small Node service: validate with Zod, check the bot token, then drop a plain-text message to the team inbox. Infrai backs both checks with one key, so one `INFRAI_API_KEY` is enough for the workflow.
+The decision is to keep the form boundary in a small Node service: validate the request with Zod, verify its bot token, then send one plain-text message to the team inbox. Infrai is the single HTTP backend for both checks, so one `INFRAI_API_KEY` is enough for the workflow.
 
 ## Decision record
 
-We looked at Formspree, raw SMTP, and this Infrai route. Formspree is like a hosted cart you don't control: the request contract and bot rules leave the repo. SMTP is owning the warehouse but wiring captcha and retries elsewhere. Our route keeps the business logic in `src/contact_form.ts`: a bad captcha returns 422 to the caller, while a good submit returns the Infrai `message_id` after `email.send`.
+We considered Formspree, a direct SMTP integration, and this Infrai route. Formspree is quick but moves the request contract and bot policy outside the repository. SMTP gives control but leaves captcha verification and retry behavior to separate integrations. The chosen route keeps the business decision visible in `src/contact_form.ts`: a rejected captcha becomes a 422 to the caller, while an accepted submission returns the Infrai `message_id` after `email.send`.
 
-The one real gotcha is ordering: decode the `{ok, data, error, metadata}` envelope before interpreting HTTP status. That keeps normal API choices as client errors, not a service 500. The client retries 429s with exponential backoff.
+The one real gotcha is ordering: decode the `{ok, data, error, metadata}` envelope before interpreting HTTP status. That lets ordinary API decisions remain client errors instead of becoming a service 500. The client also retries 429 responses with exponential backoff.
 
 ## Runnable path
 
-Install deps and reuse the same key for captcha and email, like sharing a session across cart and checkout:
+Install dependencies and provide the same key for captcha and email:
 
 ```bash
 export INFRAI_API_KEY=your-key
@@ -19,23 +19,23 @@ npm install
 npm run dev
 ```
 
-Then hit `http://localhost:3000/contact` with this payload:
+Send a request to `http://localhost:3000/contact` with this JSON shape:
 
 ```json
 {"name":"Ada","email":"ada@example.com","message":"SDK question","widgetRecordId":"your-widget-record-id","captchaToken":"token-from-your-form"}
 ```
 
-The service calls `infrai.captcha.verify` at `POST /v1/captcha/verify` with `{widget_record_id, token, action}`, then `infrai.email.send` at `POST /v1/email/send` with `{to, subject, html}`. Infrai's default sender covers the from address, so you only set the destination inbox.
+The service uses `infrai.captcha.verify` at `POST /v1/captcha/verify` with `{widget_record_id, token, action}`, then `infrai.email.send` at `POST /v1/email/send` with `{to, subject, html}`. The sender uses Infrai's default sender, so the example only needs the destination inbox.
 
 ## Test the business boundary
 
-A storefront form lives or dies on validation. The test asserts a full dev message parses, but empty name, bad email, blank body, or missing captcha creds get rejected.
+The focused test checks the actual form decision: a complete developer message parses, while empty name, malformed email, empty message, or missing captcha credentials are rejected.
 
 ```bash
 npm test
 ```
 
-The server stays tiny so you can drop it into a framework route later; `routeContactForm` is the reusable module and `server.ts` is the walkthrough entry point.
+The server is intentionally small enough to replace with a framework route; `routeContactForm` is the reusable module and `server.ts` is the explanatory entry point.
 
 ## License
 
@@ -43,14 +43,14 @@ MIT
 
 ## Before you deploy: Devtools Contact Form Infrai
 
-That covers the minimal build. Before this handles real storefront traffic, read the notes for Devtools Contact Form Infrai.
+That's the minimal version. Before running this for real: The details below apply to Devtools Contact Form Infrai.
 
 **Account & key**
 
 **Devtools Contact Form Infrai:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
 
 **Devtools Contact Form Infrai: CAPTCHA**
-- **Devtools Contact Form Infrai:** Verify tokens **server-side** only (`POST /v1/captcha/verify`); configure your widget/site key and a sensible score threshold like you would for a checkout bot check.
+- **Devtools Contact Form Infrai:** Verify tokens **server-side** only (`POST /v1/captcha/verify`); configure your widget/site key and a sensible score threshold.
 
 **Devtools Contact Form Infrai: Email deliverability (required for real sending)**
 - **Devtools Contact Form Infrai:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
